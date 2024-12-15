@@ -8,6 +8,7 @@
 #include <err.h>
 #include <assert.h>
 #include <mpi.h>
+#include <omp.h>
 
 typedef uint64_t u64;       /* portable 64-bit integer */
 typedef uint32_t u32;       /* portable 32-bit integer */
@@ -127,6 +128,7 @@ void dict_setup(u64 size)
 	A = malloc(sizeof(*A) * dict_size);
 	if (A == NULL)
 		err(1, "impossible to allocate the dictionnary");
+    #pragma omp parallel for
 	for (u64 i = 0; i < dict_size; i++)
 		A[i].k = EMPTY;
 }
@@ -171,10 +173,19 @@ int dict_probe(u64 key, int maxval, u64 values[])
             h = 0;
    	}
 }
+#include <math.h>
+
+double log2(double x) {
+    return log(x) / log(2);
+}
+
 
 int dict_probe_local(u64 key, int maxval, u64 values[], int rank, int num_processes) {
+
+    int number_bits= log2(num_processes);
+    u64 mask = (1ULL << number_bits) - 1;
     // On prend les 2 derniers bits pour déterminer le processus cible
-    int target_process = (key & 0b11);  // Les 2 derniers bits de la clé
+    int target_process = (key & mask);  // Les 2 derniers bits de la clé
 
     // Si la clé appartient au processus courant (d'après ses 2 derniers bits), on la recherche localement
     if (target_process == rank) {
@@ -196,6 +207,7 @@ u64 f(u64 k)
     Speck64128Encrypt(P[0], Ct, rk);
     return ((u64) Ct[0] ^ ((u64) Ct[1] << 32)) & mask;
 }
+
 
 /* g : {0, 1}^n --> {0, 1}^n.  speck64-128 decryption of C[0], using k */
 u64 g(u64 k)
@@ -238,14 +250,19 @@ int golden_claw_search_mpi(int maxres, u64 k1[], u64 k2[], int rank, int num_pro
     dict_setup(local_dict_size);  // Utilise une table plus petite pour chaque processus
 printf(" La taille du dictionnaire local est %d\n", local_dict_size);
     // Chaque processus remplit sa propre table de hachage
+    #pragma omp parallel for
     for (u64 x = 0; x < N; x++) {
-        // On extrait les deux derniers bits de x
-        int target_process = (x & 0b11);  // Utilise les deux derniers bits pour déterminer le processus cible
+        
+    int number_bits= log2(num_processes);
+    u64 mask = (1ULL << number_bits) - 1;
+    // On prend les 2 derniers bits pour déterminer le processus cible
+    int target_process = (x & mask);  // Les 2 derniers bits de la clé
 
         // Envoi des données uniquement au processus cible basé sur les bits
         if (target_process == rank) {
           
             u64 z = f(x);
+            #pragma omp critical
             dict_insert(z, x);
             
         }
