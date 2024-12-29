@@ -250,7 +250,7 @@ void dict_clear() {
 int golden_claw_search_mpi(int maxres, u64 k1[], u64 k2[], int rank, int num_processes) {
     double start = wtime();
     u64 N = 1ull << n;
-    u64 local_dict_size = (1.125 * N) / num_processes;
+    u64 local_dict_size = (1.125 * N);
 
     // Allouer un grand bloc de mémoire global pour toutes les entrées
     struct entry *global_hash_table = malloc(local_dict_size * sizeof(struct entry));
