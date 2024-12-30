@@ -245,64 +245,47 @@ void dict_clear() {
     dict_size = 0; // Réinitialise la taille de la table
 }
 
-
-
 int golden_claw_search_mpi(int maxres, u64 k1[], u64 k2[], int rank, int num_processes) {
     double start = wtime();
     u64 N = 1ull << n;
-    u64 local_dict_size = (1.125 * N);
+    u64 local_dict_size = (1.125 * N) ;  
 
-    // Allouer un grand bloc de mémoire global pour toutes les entrées
-    struct entry *global_hash_table = malloc(local_dict_size * sizeof(struct entry));
-    if (!global_hash_table) {
-        fprintf(stderr, "Allocation failed for global_hash_table\n");
-        return -1;
-    }
-
-    // Diviser le tableau global en segments pour chaque thread
-    int num_threads = omp_get_max_threads();
-    u64 *segment_sizes = calloc(num_threads, sizeof(u64));  // Initialisé à zéro
-    if (!segment_sizes) {
-        fprintf(stderr, "Allocation failed for segment_sizes\n");
-        free(global_hash_table);
-        return -1;
-    }
-
-    u64 local_size_per_thread = local_dict_size / num_threads;
-int number_bits = log2(num_processes);
-            u64 mask = (1ULL << number_bits) - 1;
+    int number_bits = log2(num_processes);
+    u64 mask = (1ULL << number_bits) - 1;
+	 
+	char hdsize[8];
+	human_format(local_dict_size * sizeof(*A), hdsize);
+	printf("A LA BAASE dictionary size: %sB\n", hdsize);
 
     for (int parity = 0; parity < 2; parity++) {
-        dict_setup(local_dict_size / 2);  // Initialiser la table de hachage globale
+        // Initialiser la table de hachage globale pour chaque parité
+        dict_setup((local_dict_size/num_processes)*2);  // Initialiser la table de hachage globale
 
-        #pragma omp parallel
+         #pragma omp parallel 
         {
-            int thread_id = omp_get_thread_num();
-            u64 offset = thread_id * local_size_per_thread;
+            // Chaque thread utilise une structure locale pour stocker les entrées
+            struct entry *local_entries = malloc(sizeof(struct entry) * local_dict_size / omp_get_num_threads());
+            u64 local_count = 0;
+            int number_bits = log2(num_processes);
+            u64 mask = (1ULL << number_bits) - 1;
 
-            // Réinitialiser les tailles de segment pour chaque thread
-            segment_sizes[thread_id] = 0;
-
-            
             #pragma omp for
             for (u64 x = 0; x < N; x++) {
                 u64 z = f(x);
-
-                // Vérifier les conditions
+                
+                // Combine les conditions pour réduire les branches
                 if (((z & 1) == parity) && ((x & mask) == rank)) {
-                    u64 index = offset + segment_sizes[thread_id]++;
-                    global_hash_table[index].k = z % PRIME;
-                    global_hash_table[index].v = x;
+                    local_entries[local_count].k = z % PRIME;
+                    local_entries[local_count].v = x;
+                    local_count++;
                 }
             }
-        }
-
-        // Fusionner les segments locaux dans la table de hachage globale
-        for (int thread_id = 0; thread_id < num_threads; thread_id++) {
-            u64 offset = thread_id * local_size_per_thread;
-            for (u64 i = 0; i < segment_sizes[thread_id]; i++) {
-                dict_insert(global_hash_table[offset + i].k, global_hash_table[offset + i].v);
+            // Fusionner les données locales dans la table globale
+            for (u64 i = 0; i < local_count; i++) {
+                dict_insert(local_entries[i].k, local_entries[i].v);
             }
+
+            free(local_entries);
         }
 
         // Recherche et validation des solutions
@@ -317,11 +300,7 @@ int number_bits = log2(num_processes);
 
                 for (int i = 0; i < nx; i++) {
                     if (is_good_pair(x[i], z)) {
-                        if (nres == maxres) {
-                            free(global_hash_table);
-                            free(segment_sizes);
-                            return -1;
-                        }
+                        
                         k1[nres] = x[i];
                         k2[nres] = z;
                         printf("SOLUTION FOUND! (process %d)\n", rank);
@@ -333,10 +312,6 @@ int number_bits = log2(num_processes);
 
         dict_clear();
     }
-
-    // Libérer la mémoire allouée
-    free(global_hash_table);
-    free(segment_sizes);
 
     double end_time = wtime();
     printf("Process %d: Execution time: %.2f seconds\n", rank, end_time - start);
