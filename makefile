@@ -4,7 +4,7 @@
 CC = mpicc
 
 # Compiler flags
-CFLAGS = -O3 -Wall -Wextra -ftree-vectorize -march=native -fopenmp
+CFLAGS = -O3 -Wall -Wextra -ftree-vectorize -march=native -fopenmp -pg
 LDFLAGS = -lm
 
 # Target executable
